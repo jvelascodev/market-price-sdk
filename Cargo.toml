@@ -1,0 +1,36 @@
+[package]
+name = "market-price-sdk"
+version = "0.1.0"
+edition = "2021"
+authors = ["Jaime Velasco <jaime@jvelascodev.com>"]
+description = "Global Market Price Tracker SDK for cryptocurrency prices"
+license = "MIT"
+repository = "https://github.com/jvelascodev/solana-sniper-bot-jv"
+
+[lib]
+
+[dependencies]
+# Async runtime
+tokio = { version = "1.45", features = ["full"] }
+
+# HTTP client
+reqwest = { version = "0.11", features = ["json"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Error handling
+thiserror = "2.0"
+
+# Async traits
+async-trait = "0.1"
+
+# Time handling
+chrono = { version = "0.4", features = ["serde"] }
+
+# UUID generation
+uuid = { version = "1.0", features = ["v4", "serde"] }
+
+# Logging
+log = "0.4"
