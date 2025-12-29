@@ -51,6 +51,12 @@ pub mod mock {
         call_count: Arc<Mutex<usize>>,
     }
 
+    impl Default for MockProvider {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
+
     impl MockProvider {
         pub fn new() -> Self {
             Self {

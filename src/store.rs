@@ -9,13 +9,19 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
+/// Type alias for an individual price slot (optionally contains price data)
+type PriceSlot = Arc<RwLock<Option<PriceData>>>;
+
+/// Type alias for the price map (asset -> price slot)
+type PriceMap = HashMap<Asset, PriceSlot>;
+
 /// In-memory store for market prices
 ///
 /// Uses tokio watch channels for efficient broadcast-style updates
 /// where multiple consumers can subscribe to price changes.
 pub struct MarketPriceStore {
     /// Storage for price data per asset
-    prices: Arc<RwLock<HashMap<Asset, Arc<RwLock<Option<PriceData>>>>>>,
+    prices: Arc<RwLock<PriceMap>>,
 }
 
 impl MarketPriceStore {

@@ -42,6 +42,12 @@ pub struct MarketPriceTracker {
     provider: Arc<dyn MarketPriceProvider>,
 }
 
+impl Default for MarketPriceTracker {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MarketPriceTracker {
     /// Returns the global singleton instance
     ///

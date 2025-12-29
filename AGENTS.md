@@ -20,7 +20,7 @@ The Market Price SDK provides real-time cryptocurrency market prices for major a
 
 All configuration is compile-time constants in `constants.rs`:
 
-- **Refresh Interval**: 25 seconds (configurable via `REFRESH_INTERVAL_SECS`)
+- **Refresh Interval**: 60 seconds (configurable via `REFRESH_INTERVAL_SECS`)
 - **Stale Threshold**: 300 seconds (5 minutes, configurable via `STALE_THRESHOLD_SECS`)
 - **Request Timeout**: 10 seconds (configurable via `REQUEST_TIMEOUT_SECS`)
 - **Max Retry Attempts**: 3 (configurable via `MAX_RETRY_ATTEMPTS`)
