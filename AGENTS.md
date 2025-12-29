@@ -7,13 +7,14 @@ The Market Price SDK provides real-time cryptocurrency market prices for major a
 ## Key Architectural Patterns for Agents
 
 - **Singleton Pattern**: Global `MarketPriceTracker::global()` instance for application-wide access
-- **Background Polling**: Automatic price fetching every 25 seconds with configurable intervals
-- **Stale Price Detection**: Automatic rejection of prices older than 5 minutes with configurable thresholds
+- **Background Polling**: Automatic price fetching every 60 seconds with configurable intervals
+- **Stale Price Detection**: Per-asset stale thresholds (SOL/ETH: 120s, BTC: 180s, stablecoins: 300s)
 - **Multi-Asset Support**: Concurrent tracking of multiple assets with thread-safe `Arc<RwLock>` storage
 - **Async/Await**: Full async operations with Tokio runtime for non-blocking price retrieval
 - **Provider Abstraction**: Pluggable `MarketPriceProvider` trait supporting CoinGecko, Hyperliquid, and mock providers
 - **Automated Failover**: `FailoverProvider` chain (Hyperliquid -> CoinGecko) for maximum reliability
-- **Health Monitoring**: Built-in health check API for operational monitoring
+- **Health Monitoring**: Built-in health check API with provider metrics (p50/p99 latency, success rates)
+- **Structured Logging**: Uses `tracing` crate for structured, async-aware logging
 - **Retry Logic**: Exponential backoff with configurable retry attempts for provider failures
 
 ## Configuration Constraints and Defaults

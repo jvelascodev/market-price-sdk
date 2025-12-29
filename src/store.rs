@@ -1,7 +1,6 @@
 //! In-memory price store with broadcast capabilities
 
 use crate::{
-    constants::STALE_THRESHOLD_SECS,
     error::PriceError,
     types::{Asset, PriceData},
 };
@@ -52,10 +51,10 @@ impl MarketPriceStore {
         if let Some(price_slot) = prices.get(&asset) {
             let mut slot = price_slot.write().await;
             *slot = Some(price_data.clone());
-            log::debug!(
-                "Updated price for {}: ${:.2}",
-                asset.symbol(),
-                price_data.price_usd
+            tracing::debug!(
+                asset = asset.symbol(),
+                price_usd = price_data.price_usd,
+                "Updated price"
             );
         }
     }
@@ -89,8 +88,8 @@ impl MarketPriceStore {
             .ok_or_else(|| PriceError::not_available(asset.symbol()))?
             .clone();
 
-        // Check if price is stale
-        if price_data.is_stale(STALE_THRESHOLD_SECS) {
+        // Check if price is stale using per-asset threshold
+        if price_data.is_stale(asset.stale_threshold_secs()) {
             let age = price_data.age();
             return Err(PriceError::stale(asset.symbol(), age));
         }
@@ -109,8 +108,8 @@ impl MarketPriceStore {
         for (asset, price_slot) in prices.iter() {
             let slot = price_slot.read().await;
             if let Some(price_data) = slot.as_ref() {
-                // Only include non-stale prices
-                if !price_data.is_stale(STALE_THRESHOLD_SECS) {
+                // Only include non-stale prices using per-asset threshold
+                if !price_data.is_stale(asset.stale_threshold_secs()) {
                     result.insert(*asset, price_data.clone());
                 }
             }
@@ -148,7 +147,7 @@ impl MarketPriceStore {
         if let Some(price_slot) = prices.get(&asset) {
             let slot = price_slot.read().await;
             if let Some(price_data) = slot.as_ref() {
-                price_data.is_stale(STALE_THRESHOLD_SECS)
+                price_data.is_stale(asset.stale_threshold_secs())
             } else {
                 true
             }

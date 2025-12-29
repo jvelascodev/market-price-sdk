@@ -35,6 +35,7 @@
 
 pub mod constants;
 pub mod error;
+pub mod metrics;
 pub mod provider;
 pub mod providers;
 pub mod store;
@@ -43,6 +44,7 @@ pub mod types;
 
 // Re-export commonly used types
 pub use error::{PriceError, ProviderError};
+pub use metrics::ProviderMetrics;
 pub use tracker::MarketPriceTracker;
 pub use types::{
     Asset, ComponentHealth, HealthStatus, MarketPriceEvent, PriceData, ProviderStatus,

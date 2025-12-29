@@ -8,6 +8,7 @@ use crate::{
         REFRESH_INTERVAL_SECS,
     },
     error::{PriceError, ProviderError},
+    metrics::{MetricsCollector, ProviderMetrics},
     provider::MarketPriceProvider,
     providers::{CoinGeckoProvider, FailoverProvider, HyperliquidProvider},
     store::MarketPriceStore,
@@ -15,7 +16,7 @@ use crate::{
 };
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::OnceCell;
 use tokio::time::sleep;
 
@@ -40,6 +41,7 @@ static GLOBAL_TRACKER: OnceCell<Arc<MarketPriceTracker>> = OnceCell::const_new()
 pub struct MarketPriceTracker {
     store: Arc<MarketPriceStore>,
     provider: Arc<dyn MarketPriceProvider>,
+    metrics: Arc<MetricsCollector>,
 }
 
 impl Default for MarketPriceTracker {
@@ -92,24 +94,26 @@ impl MarketPriceTracker {
     /// This is primarily for testing with mock providers.
     pub fn with_provider(provider: Arc<dyn MarketPriceProvider>) -> Self {
         let store = Arc::new(MarketPriceStore::new());
+        let metrics = Arc::new(MetricsCollector::new(provider.provider_name()));
 
-        Self { store, provider }
+        Self { store, provider, metrics }
     }
 
     /// Starts the background polling task
     fn start_background_task(&self) {
         let store = self.store.clone();
         let provider = self.provider.clone();
+        let metrics = self.metrics.clone();
 
         tokio::spawn(async move {
-            log::info!(
-                "Starting market price tracker background task (refresh interval: {}s)",
-                REFRESH_INTERVAL_SECS
+            tracing::info!(
+                refresh_interval_secs = REFRESH_INTERVAL_SECS,
+                "Starting market price tracker background task"
             );
 
             loop {
-                if let Err(e) = Self::fetch_and_update(&provider, &store).await {
-                    log::warn!("Failed to fetch prices: {}", e);
+                if let Err(e) = Self::fetch_and_update(&provider, &store, &metrics).await {
+                    tracing::warn!(error = %e, "Failed to fetch prices");
                 }
 
                 sleep(Duration::from_secs(REFRESH_INTERVAL_SECS)).await;
@@ -117,36 +121,41 @@ impl MarketPriceTracker {
         });
     }
 
-    /// Fetches prices from provider and updates the store
+    /// Fetches prices from provider and updates the store with metrics tracking
     async fn fetch_and_update(
         provider: &Arc<dyn MarketPriceProvider>,
         store: &Arc<MarketPriceStore>,
+        metrics: &Arc<MetricsCollector>,
     ) -> Result<(), ProviderError> {
         let mut backoff_ms = INITIAL_BACKOFF_MS;
+        let start = Instant::now();
 
         for attempt in 1..=MAX_RETRY_ATTEMPTS {
             match provider.fetch_prices(ENABLED_ASSETS).await {
                 Ok(prices) => {
-                    log::debug!(
-                        "Successfully fetched {} prices from {}",
-                        prices.len(),
-                        provider.provider_name()
+                    tracing::debug!(
+                        count = prices.len(),
+                        provider = provider.provider_name(),
+                        latency_ms = start.elapsed().as_millis() as u64,
+                        "Successfully fetched prices"
                     );
                     store.update_prices(prices).await;
+                    metrics.record_request(start.elapsed(), true).await;
                     return Ok(());
                 }
                 Err(e) => {
-                    log::warn!(
-                        "Attempt {}/{} failed to fetch prices: {}",
-                        attempt,
-                        MAX_RETRY_ATTEMPTS,
-                        e
+                    tracing::warn!(
+                        attempt = attempt,
+                        max_attempts = MAX_RETRY_ATTEMPTS,
+                        error = %e,
+                        "Failed to fetch prices, retrying"
                     );
 
                     if attempt < MAX_RETRY_ATTEMPTS {
                         sleep(Duration::from_millis(backoff_ms)).await;
                         backoff_ms = (backoff_ms * 2).min(MAX_BACKOFF_MS);
                     } else {
+                        metrics.record_request(start.elapsed(), false).await;
                         return Err(e);
                     }
                 }
@@ -235,7 +244,30 @@ impl MarketPriceTracker {
     /// # Returns
     /// Ok if prices were successfully fetched and updated
     pub async fn refresh_now(&self) -> Result<(), ProviderError> {
-        Self::fetch_and_update(&self.provider, &self.store).await
+        Self::fetch_and_update(&self.provider, &self.store, &self.metrics).await
+    }
+
+    /// Gets provider metrics including latency percentiles and success rates
+    ///
+    /// # Returns
+    /// ProviderMetrics with p50/p99 latencies and success rate
+    ///
+    /// # Example
+    /// ```no_run
+    /// # use market_price_sdk::MarketPriceTracker;
+    /// # async fn example() {
+    /// let tracker = MarketPriceTracker::global().await;
+    /// let metrics = tracker.get_provider_metrics().await;
+    /// println!("Provider {}: p50={}ms, p99={}ms, success_rate={:.1}%",
+    ///     metrics.provider_name,
+    ///     metrics.latency_p50_ms,
+    ///     metrics.latency_p99_ms,
+    ///     metrics.success_rate * 100.0
+    /// );
+    /// # }
+    /// ```
+    pub async fn get_provider_metrics(&self) -> ProviderMetrics {
+        self.metrics.get_metrics().await
     }
 
     /// Perform a health check on the market price tracker

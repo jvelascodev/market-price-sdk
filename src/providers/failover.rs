@@ -33,11 +33,11 @@ impl MarketPriceProvider for FailoverProvider {
             match provider.fetch_price(asset).await {
                 Ok(price) => return Ok(price),
                 Err(e) => {
-                    log::warn!(
-                        "Provider {} failed to fetch price for {}: {}",
-                        provider.provider_name(),
-                        asset.symbol(),
-                        e
+                    tracing::warn!(
+                        provider = provider.provider_name(),
+                        asset = asset.symbol(),
+                        error = %e,
+                        "Provider failed to fetch price"
                     );
                     last_error = Some(e);
                 }
@@ -59,10 +59,10 @@ impl MarketPriceProvider for FailoverProvider {
             match provider.fetch_prices(assets).await {
                 Ok(prices) => return Ok(prices),
                 Err(e) => {
-                    log::warn!(
-                        "Provider {} failed to fetch prices: {}",
-                        provider.provider_name(),
-                        e
+                    tracing::warn!(
+                        provider = provider.provider_name(),
+                        error = %e,
+                        "Provider failed to fetch prices"
                     );
                     last_error = Some(e);
                 }

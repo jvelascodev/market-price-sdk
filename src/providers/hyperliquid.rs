@@ -89,7 +89,7 @@ impl MarketPriceProvider for HyperliquidProvider {
             return Ok(HashMap::new());
         }
 
-        log::debug!("Fetching prices from Hyperliquid: {}", HYPERLIQUID_API_URL);
+        tracing::debug!(url = HYPERLIQUID_API_URL, "Fetching prices from Hyperliquid");
 
         let request_body = HyperliquidRequest::AllMids;
 
@@ -132,10 +132,7 @@ impl MarketPriceProvider for HyperliquidProvider {
             ));
         }
 
-        log::debug!(
-            "Successfully fetched {} prices from Hyperliquid",
-            prices.len()
-        );
+        tracing::debug!(count = prices.len(), "Successfully fetched prices from Hyperliquid");
 
         Ok(prices)
     }

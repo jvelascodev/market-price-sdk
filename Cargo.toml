@@ -14,7 +14,7 @@ repository = "https://github.com/jvelascodev/solana-sniper-bot-jv"
 tokio = { version = "1.45", features = ["full"] }
 
 # HTTP client
-reqwest = { version = "0.11", features = ["json"] }
+reqwest = { version = "0.12", features = ["json"] }
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
@@ -32,5 +32,6 @@ chrono = { version = "0.4", features = ["serde"] }
 # UUID generation
 uuid = { version = "1.0", features = ["v4", "serde"] }
 
-# Logging
-log = "0.4"
+# Structured logging / tracing
+tracing = "0.1"
+

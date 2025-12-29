@@ -104,7 +104,7 @@ impl MarketPriceProvider for CoinGeckoProvider {
         }
 
         let url = self.build_url(assets);
-        log::debug!("Fetching prices from CoinGecko: {}", url);
+        tracing::debug!(url = %url, "Fetching prices from CoinGecko");
 
         let response = self
             .client
@@ -145,10 +145,7 @@ impl MarketPriceProvider for CoinGeckoProvider {
             ));
         }
 
-        log::debug!(
-            "Successfully fetched {} prices from CoinGecko",
-            prices.len()
-        );
+        tracing::debug!(count = prices.len(), "Successfully fetched prices from CoinGecko");
 
         Ok(prices)
     }

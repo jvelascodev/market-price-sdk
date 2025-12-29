@@ -76,6 +76,23 @@ impl Asset {
             Asset::WETH,
         ]
     }
+
+    /// Get the stale threshold for this asset in seconds
+    ///
+    /// Different assets have different freshness requirements:
+    /// - High-frequency assets (SOL, ETH): 120 seconds
+    /// - Moderate frequency (BTC, WBTC, WETH): 180 seconds
+    /// - Stablecoins (USDC, USDT): 300 seconds (price rarely changes)
+    pub fn stale_threshold_secs(&self) -> u64 {
+        match self {
+            // High-frequency trading assets need fresher data
+            Asset::SOL | Asset::ETH => 120,
+            // Moderate frequency
+            Asset::BTC | Asset::WBTC | Asset::WETH => 180,
+            // Stablecoins - price is relatively stable
+            Asset::USDC | Asset::USDT => 300,
+        }
+    }
 }
 
 /// Price data for an asset
