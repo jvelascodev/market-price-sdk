@@ -17,7 +17,7 @@ use crate::{
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::OnceCell;
+use tokio::sync::{broadcast, OnceCell};
 use tokio::time::sleep;
 
 static GLOBAL_TRACKER: OnceCell<Arc<MarketPriceTracker>> = OnceCell::const_new();
@@ -42,6 +42,7 @@ pub struct MarketPriceTracker {
     store: Arc<MarketPriceStore>,
     provider: Arc<dyn MarketPriceProvider>,
     metrics: Arc<MetricsCollector>,
+    shutdown_tx: broadcast::Sender<()>,
 }
 
 impl Default for MarketPriceTracker {
@@ -72,8 +73,9 @@ impl MarketPriceTracker {
     /// By default, it uses the provider specified in the `MARKET_PRICE_PROVIDER`
     /// environment variable ("coingecko" or "hyperliquid"). Defaults to coingecko.
     pub fn new() -> Self {
-        let provider_name = std::env::var("MARKET_PRICE_PROVIDER").unwrap_or_else(|_| "failover".to_string());
-        
+        let provider_name =
+            std::env::var("MARKET_PRICE_PROVIDER").unwrap_or_else(|_| "failover".to_string());
+
         let provider: Arc<dyn MarketPriceProvider> = match provider_name.to_lowercase().as_str() {
             "hyperliquid" => Arc::new(HyperliquidProvider::default()),
             "coingecko" => Arc::new(CoinGeckoProvider::default()),
@@ -95,8 +97,14 @@ impl MarketPriceTracker {
     pub fn with_provider(provider: Arc<dyn MarketPriceProvider>) -> Self {
         let store = Arc::new(MarketPriceStore::new());
         let metrics = Arc::new(MetricsCollector::new(provider.provider_name()));
+        let (shutdown_tx, _) = broadcast::channel(1);
 
-        Self { store, provider, metrics }
+        Self {
+            store,
+            provider,
+            metrics,
+            shutdown_tx,
+        }
     }
 
     /// Starts the background polling task
@@ -104,6 +112,7 @@ impl MarketPriceTracker {
         let store = self.store.clone();
         let provider = self.provider.clone();
         let metrics = self.metrics.clone();
+        let mut shutdown_rx = self.shutdown_tx.subscribe();
 
         tokio::spawn(async move {
             tracing::info!(
@@ -112,11 +121,17 @@ impl MarketPriceTracker {
             );
 
             loop {
-                if let Err(e) = Self::fetch_and_update(&provider, &store, &metrics).await {
-                    tracing::warn!(error = %e, "Failed to fetch prices");
+                tokio::select! {
+                    _ = shutdown_rx.recv() => {
+                        tracing::info!("Market price tracker background task shutting down");
+                        break;
+                    }
+                    _ = sleep(Duration::from_secs(REFRESH_INTERVAL_SECS)) => {
+                        if let Err(e) = Self::fetch_and_update(&provider, &store, &metrics).await {
+                            tracing::warn!(error = %e, "Failed to fetch prices");
+                        }
+                    }
                 }
-
-                sleep(Duration::from_secs(REFRESH_INTERVAL_SECS)).await;
             }
         });
     }
@@ -329,5 +344,9 @@ impl MarketPriceTracker {
             last_checked: chrono::Utc::now(),
         }
     }
-}
 
+    /// Shutdown the market price tracker
+    pub fn shutdown(&self) {
+        let _ = self.shutdown_tx.send(());
+    }
+}
