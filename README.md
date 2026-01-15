@@ -4,16 +4,16 @@ A high-performance Rust SDK for tracking real-time cryptocurrency market prices 
 
 ## Features
 
-- **Pyth gRPC Integration**: Low-latency, real-time price streaming via Yellowstone Geyser (no REST rate limits).
-- **Automated Failover**: Defaults to **Pyth gRPC** with automatic fallback to **CoinGecko**.
+- **Pyth Hermes (V2) Integration**: Real-time price streaming via Pyth's Hermes SSE API (HTTP/2).
+- **Automated Failover**: Defaults to **Hermes** with optional fallback to **CoinGecko**.
 - **In-Memory Cache**: Sub-microsecond price retrieval from a thread-safe `RwLock` store.
-- **Background Polling/Streaming**: Background tasks handle both REST polling and gRPC streaming.
+- **Background Polling/Streaming**: Background tasks handle both REST polling and SSE streaming.
 - **Resilient**: Built-in exponential backoff, retry logic, and staleness detection.
 - **Singleton Design**: Simple `MarketPriceTracker::global()` interface for easy integration.
 
 ## ⚠️ Breaking Change: Async Initialization
 
-As of version 0.1.0, the `MarketPriceTracker` initialization has become **asynchronous**. This was required to support low-latency gRPC streaming.
+As of version 0.1.0, the `MarketPriceTracker` initialization has become **asynchronous**.
 
 - **Before**: `let tracker = MarketPriceTracker::global();`
 - **Now**: `let tracker = MarketPriceTracker::global().await;`
@@ -30,7 +30,7 @@ use market_price_sdk::{MarketPriceTracker, Asset};
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Get the global tracker (initializes on first call)
-    // By default, it uses Pyth gRPC as the primary source
+    // By default, it uses Pyth Hermes (SSE) as the primary source
     let tracker = MarketPriceTracker::global().await;
 
     // Get a price (checks cache first, handles staleness)
@@ -49,9 +49,7 @@ The SDK uses zero runtime config files. Behavior is controlled via compile-time 
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `MARKET_PRICE_PROVIDER` | Selection: `pyth-grpc`, `failover`, `hyperliquid`, or `coingecko` | `failover` (Pyth + CoinGecko) |
-| `PYTH_GRPC_ENDPOINT` | Yellowstone gRPC endpoint | `https://solana-yellowstone-grpc.publicnode.com:443` |
-| `PYTH_GRPC_TOKEN` | Optional X-Token for gRPC authentication | `None` |
+| `MARKET_PRICE_PROVIDER` | Selection: `hermes`, `failover`, `hyperliquid`, or `coingecko` | `hermes` |
 | `RUST_LOG` | Logging level (e.g., `info`, `debug`) | `info` |
 
 ## Benchmarks
@@ -61,16 +59,16 @@ The SDK is optimized for high-frequency trading where decision latency is critic
 | Operation | Latency | Source |
 |-----------|---------|--------|
 | **Cache Retrieval** | ~850ns - 1.5µs | In-process memory |
-| **gRPC Update** | < 10ms (Real-time) | Pyth/Solana Network |
+| **Stream Update** | Real-time | Pyth Hermes |
 | **REST API Refresh** | 350ms - 450ms | External Network |
 
 Run the benchmarks yourself:
 ```bash
 cargo run --example sol_price_benchmark
 ```
-Or try the Pyth-specific example:
+Or try the streaming example:
 ```bash
-cargo run --example pyth_v2_price_example
+cargo run --example hermes_stream
 ```
 
 ## Architecture
@@ -81,7 +79,7 @@ The tracker manages a background loop/stream that populates an internal `MarketP
 graph TD
     A[MarketPriceTracker::global] --> B[Background Tasks]
     B --> C{Provider Selection}
-    C -->|gRPC Stream| D[Pyth gRPC (DEFAULT)]
+    C -->|SSE Stream| D[Pyth Hermes (DEFAULT)]
     C -->|REST Polling| E[Hyperliquid]
     C -->|REST Polling| F[CoinGecko (BACKUP)]
     D & E & F --> G[MarketPriceStore]
