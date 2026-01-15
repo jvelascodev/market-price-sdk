@@ -64,6 +64,48 @@ impl Asset {
         }
     }
 
+    /// Get the Pyth price account address for this asset on Solana Mainnet (Legacy/Push)
+    pub fn pyth_price_account(&self) -> Option<&'static str> {
+        match self {
+            Asset::SOL => Some("H6ARHf6YXhGYeQfUzQNGk6rDNnLBQKrenN712K4AQJEG"),
+            Asset::BTC => Some("GVXRSBjTuSre6FEz6Y8knasS17Mh8p6N62EWhvV3XWvF"),
+            Asset::ETH => Some("J83w4HKfqxwcq3BEMMkPFSppX3gqekLyLJBexebFVkix"),
+            _ => None,
+        }
+    }
+
+    /// Get the Pyth Pull Oracle (V2) price account address for this asset on Solana Mainnet
+    pub fn pyth_v2_price_account(&self) -> Option<&'static str> {
+        match self {
+            Asset::SOL => Some("7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE"),
+            Asset::BTC => Some("4cSM2e4TzT8E45aG3Mge8z3E9b9NqWwP5wzPSPo"),
+            Asset::ETH => Some("42amVS4KgzR9rA28tkVYqVXjq9Qa8dcZQMbH5EYFX6XC"),
+            _ => None,
+        }
+    }
+
+    /// Get the Pyth V2 Price Feed ID (Hex) for Hermes
+    pub fn pyth_feed_id(&self) -> Option<&'static str> {
+        match self {
+            Asset::SOL => {
+                Some("0xef0d8b6fda2ceba41da15d4095d1da392a0d2f8ed0c6c7bc0f4cfac8c280b56d")
+            }
+            Asset::BTC => {
+                Some("0xe62df6c8b4a85fe1a67db44dc12de5db330f7ac66b72dc658afedf0f4a415b43")
+            }
+            Asset::ETH => {
+                Some("0xff61491a931112ddf1bd8147cd1b641375f79f5825126d665480874634fd0ace")
+            }
+            Asset::USDC => {
+                Some("0xeaa020c61cc479712813461ce153894a96a6c00b21ed0cfc2798d1f9a9e9c94a")
+            }
+            Asset::USDT => {
+                Some("0x2b89b9dc8fdf9f34709a5b106b472f0f39bb6ca9ce04b0fd7f2e971688e2e53b")
+            }
+            _ => None,
+        }
+    }
+
     /// Get all supported assets
     pub fn all() -> &'static [Asset] {
         &[

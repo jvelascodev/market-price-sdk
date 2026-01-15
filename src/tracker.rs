@@ -10,7 +10,7 @@ use crate::{
     error::{PriceError, ProviderError},
     metrics::{MetricsCollector, ProviderMetrics},
     provider::MarketPriceProvider,
-    providers::{CoinGeckoProvider, FailoverProvider, HyperliquidProvider},
+    providers::{CoinGeckoProvider, HyperliquidProvider},
     store::MarketPriceStore,
     types::{Asset, ComponentHealth, HealthStatus, PriceData},
 };
@@ -45,12 +45,6 @@ pub struct MarketPriceTracker {
     shutdown_tx: broadcast::Sender<()>,
 }
 
-impl Default for MarketPriceTracker {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl MarketPriceTracker {
     /// Returns the global singleton instance
     ///
@@ -59,7 +53,7 @@ impl MarketPriceTracker {
     pub async fn global() -> Arc<Self> {
         GLOBAL_TRACKER
             .get_or_init(|| async {
-                let tracker = Self::new();
+                let tracker = Self::new().await;
                 tracker.start_background_task();
                 Arc::new(tracker)
             })
@@ -71,20 +65,49 @@ impl MarketPriceTracker {
     ///
     /// This is primarily for testing. Use `global()` in production code.
     /// By default, it uses the provider specified in the `MARKET_PRICE_PROVIDER`
-    /// environment variable ("coingecko" or "hyperliquid"). Defaults to coingecko.
-    pub fn new() -> Self {
+    /// environment variable ("coingecko" or "hyperliquid"). Defaults to hermes.
+    pub async fn new() -> Self {
         let provider_name =
-            std::env::var("MARKET_PRICE_PROVIDER").unwrap_or_else(|_| "failover".to_string());
+            std::env::var("MARKET_PRICE_PROVIDER").unwrap_or_else(|_| "hermes".to_string());
 
         let provider: Arc<dyn MarketPriceProvider> = match provider_name.to_lowercase().as_str() {
+            "hermes" | "default" => match crate::providers::HermesProvider::new().await {
+                Ok(p) => p,
+                Err(e) => {
+                    tracing::error!(
+                        error = %e,
+                        provider = "hermes",
+                        "Failed to initialize Hermes provider. Falling back to CoinGecko."
+                    );
+                    Arc::new(CoinGeckoProvider::default())
+                }
+            },
+            "failover" => {
+                // Failover: Hermes (primary) -> CoinGecko (backup)
+                let primary = match crate::providers::HermesProvider::new().await {
+                    Ok(p) => Some(p as Arc<dyn MarketPriceProvider>),
+                    Err(_) => None,
+                };
+
+                let backup = Arc::new(CoinGeckoProvider::default());
+
+                if let Some(p) = primary {
+                    Arc::new(crate::providers::FailoverProvider::new(vec![p, backup]))
+                } else {
+                    backup
+                }
+            }
             "hyperliquid" => Arc::new(HyperliquidProvider::default()),
             "coingecko" => Arc::new(CoinGeckoProvider::default()),
             _ => {
-                // Default failover: Hyperliquid (primary) -> CoinGecko (backup)
-                Arc::new(FailoverProvider::new(vec![
-                    Arc::new(HyperliquidProvider::default()),
-                    Arc::new(CoinGeckoProvider::default()),
-                ]))
+                tracing::warn!(
+                    provider = %provider_name,
+                    "Unknown provider specified. Defaulting to Hermes."
+                );
+                match crate::providers::HermesProvider::new().await {
+                    Ok(p) => p,
+                    Err(_) => Arc::new(CoinGeckoProvider::default()),
+                }
             }
         };
 
@@ -119,6 +142,11 @@ impl MarketPriceTracker {
                 refresh_interval_secs = REFRESH_INTERVAL_SECS,
                 "Starting market price tracker background task"
             );
+
+            // Initial fetch
+            if let Err(e) = Self::fetch_and_update(&provider, &store, &metrics).await {
+                tracing::warn!(error = %e, "Initial price fetch failed");
+            }
 
             loop {
                 tokio::select! {
@@ -201,7 +229,20 @@ impl MarketPriceTracker {
     /// # }
     /// ```
     pub async fn get_price(&self, asset: Asset) -> Result<PriceData, PriceError> {
-        self.store.get_price(asset).await
+        match self.store.get_price(asset).await {
+            Ok(price) => Ok(price),
+            Err(_) => {
+                // If not in store, try fetching directly from provider
+                // This is especially useful for streaming providers like Pyth gRPC
+                self.provider.fetch_price(asset).await.map_err(|e| {
+                    PriceError::not_available(&format!(
+                        "{} (Provider error: {})",
+                        asset.symbol(),
+                        e
+                    ))
+                })
+            }
+        }
     }
 
     /// Gets prices for all tracked assets

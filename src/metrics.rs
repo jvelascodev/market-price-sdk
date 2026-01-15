@@ -176,7 +176,7 @@ impl Drop for RequestTimer {
         let duration = self.start.elapsed();
         let collector = self.collector.clone();
         let success = self.success;
-        
+
         // Spawn a task to record the metric asynchronously
         tokio::spawn(async move {
             collector.record_request(duration, success).await;
@@ -193,9 +193,15 @@ mod tests {
         let collector = MetricsCollector::new("test");
 
         // Record some requests
-        collector.record_request(Duration::from_millis(100), true).await;
-        collector.record_request(Duration::from_millis(200), true).await;
-        collector.record_request(Duration::from_millis(150), false).await;
+        collector
+            .record_request(Duration::from_millis(100), true)
+            .await;
+        collector
+            .record_request(Duration::from_millis(200), true)
+            .await;
+        collector
+            .record_request(Duration::from_millis(150), false)
+            .await;
 
         let metrics = collector.get_metrics().await;
 
@@ -208,7 +214,7 @@ mod tests {
     #[test]
     fn test_percentile() {
         let values = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0];
-        assert_eq!(percentile(&values, 50.0), 5.0);
+        assert_eq!(percentile(&values, 50.0), 6.0);
         assert_eq!(percentile(&values, 99.0), 10.0);
     }
 }

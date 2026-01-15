@@ -7,3 +7,5 @@ pub mod hyperliquid;
 pub use coingecko::CoinGeckoProvider;
 pub use failover::FailoverProvider;
 pub use hyperliquid::HyperliquidProvider;
+pub mod hermes;
+pub use hermes::HermesProvider;
