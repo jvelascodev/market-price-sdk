@@ -42,6 +42,7 @@ pub struct MarketPriceTracker {
     store: Arc<MarketPriceStore>,
     provider: Arc<dyn MarketPriceProvider>,
     metrics: Arc<MetricsCollector>,
+    update_tx: broadcast::Sender<PriceData>,
     shutdown_tx: broadcast::Sender<()>,
 }
 
@@ -120,14 +121,24 @@ impl MarketPriceTracker {
     pub fn with_provider(provider: Arc<dyn MarketPriceProvider>) -> Self {
         let store = Arc::new(MarketPriceStore::new());
         let metrics = Arc::new(MetricsCollector::new(provider.provider_name()));
+        let (update_tx, _) = broadcast::channel(1000);
         let (shutdown_tx, _) = broadcast::channel(1);
 
         Self {
             store,
             provider,
             metrics,
+            update_tx,
             shutdown_tx,
         }
+    }
+
+    /// Subscribes to real-time price updates
+    ///
+    /// This is the reactive way to consume prices, especially with
+    /// streaming providers like Hermes.
+    pub fn subscribe(&self) -> broadcast::Receiver<PriceData> {
+        self.update_tx.subscribe()
     }
 
     /// Starts the background polling task
@@ -135,7 +146,17 @@ impl MarketPriceTracker {
         let store = self.store.clone();
         let provider = self.provider.clone();
         let metrics = self.metrics.clone();
+        let update_tx = self.update_tx.clone();
         let mut shutdown_rx = self.shutdown_tx.subscribe();
+
+        if provider.is_streaming() {
+            tracing::info!(
+                provider = provider.provider_name(),
+                "Starting market price tracker in reactive streaming mode"
+            );
+            provider.start_streaming(store, update_tx);
+            return;
+        }
 
         tokio::spawn(async move {
             tracing::info!(
@@ -144,7 +165,7 @@ impl MarketPriceTracker {
             );
 
             // Initial fetch
-            if let Err(e) = Self::fetch_and_update(&provider, &store, &metrics).await {
+            if let Err(e) = Self::fetch_and_update(&provider, &store, &metrics, &update_tx).await {
                 tracing::warn!(error = %e, "Initial price fetch failed");
             }
 
@@ -155,7 +176,7 @@ impl MarketPriceTracker {
                         break;
                     }
                     _ = sleep(Duration::from_secs(REFRESH_INTERVAL_SECS)) => {
-                        if let Err(e) = Self::fetch_and_update(&provider, &store, &metrics).await {
+                        if let Err(e) = Self::fetch_and_update(&provider, &store, &metrics, &update_tx).await {
                             tracing::warn!(error = %e, "Failed to fetch prices");
                         }
                     }
@@ -169,6 +190,7 @@ impl MarketPriceTracker {
         provider: &Arc<dyn MarketPriceProvider>,
         store: &Arc<MarketPriceStore>,
         metrics: &Arc<MetricsCollector>,
+        update_tx: &broadcast::Sender<PriceData>,
     ) -> Result<(), ProviderError> {
         let mut backoff_ms = INITIAL_BACKOFF_MS;
         let start = Instant::now();
@@ -182,7 +204,13 @@ impl MarketPriceTracker {
                         latency_ms = start.elapsed().as_millis() as u64,
                         "Successfully fetched prices"
                     );
-                    store.update_prices(prices).await;
+                    store.update_prices(prices.clone()).await;
+
+                    // Broadcast updates for reactive consumers
+                    for price in prices.values() {
+                        let _ = update_tx.send(price.clone());
+                    }
+
                     metrics.record_request(start.elapsed(), true).await;
                     return Ok(());
                 }
@@ -300,7 +328,7 @@ impl MarketPriceTracker {
     /// # Returns
     /// Ok if prices were successfully fetched and updated
     pub async fn refresh_now(&self) -> Result<(), ProviderError> {
-        Self::fetch_and_update(&self.provider, &self.store, &self.metrics).await
+        Self::fetch_and_update(&self.provider, &self.store, &self.metrics, &self.update_tx).await
     }
 
     /// Gets provider metrics including latency percentiles and success rates

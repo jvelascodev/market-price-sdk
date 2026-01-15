@@ -1,3 +1,4 @@
+use crate::store::MarketPriceStore;
 use crate::types::{Asset, PriceData};
 use crate::ProviderError;
 use async_trait::async_trait;
@@ -8,6 +9,7 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
+use tokio::sync::broadcast;
 use tracing::{error, info};
 
 #[derive(Debug, Deserialize)]
@@ -38,6 +40,7 @@ struct HermesStats {
 }
 
 pub struct HermesProvider {
+    client: reqwest::Client,
     prices: Arc<RwLock<HashMap<Asset, PriceData>>>,
     #[allow(dead_code)]
     stats: Arc<RwLock<HermesStats>>,
@@ -53,29 +56,9 @@ impl HermesProvider {
         }));
 
         let provider = Arc::new(Self {
-            prices: prices.clone(),
-            stats: stats.clone(),
-        });
-
-        // Start background streamer
-        let prices_clone = prices.clone();
-        let stats_clone = stats.clone();
-        let client_clone = client.clone();
-
-        tokio::spawn(async move {
-            loop {
-                info!("Connecting to Hermes stream...");
-                if let Err(e) = Self::stream_prices(
-                    client_clone.clone(),
-                    prices_clone.clone(),
-                    stats_clone.clone(),
-                )
-                .await
-                {
-                    error!("Hermes stream disconnected: {}. Reconnecting in 5s...", e);
-                    tokio::time::sleep(Duration::from_secs(5)).await;
-                }
-            }
+            client,
+            prices,
+            stats,
         });
 
         Ok(provider)
@@ -84,6 +67,8 @@ impl HermesProvider {
     async fn stream_prices(
         client: Client,
         prices: Arc<RwLock<HashMap<Asset, PriceData>>>,
+        global_store: Option<Arc<MarketPriceStore>>,
+        update_tx: Option<broadcast::Sender<PriceData>>,
         stats: Arc<RwLock<HermesStats>>,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         // Build URL
@@ -127,9 +112,6 @@ impl HermesProvider {
                     if event.event == "price_update" || event.event == "message" {
                         tracing::trace!("Received Hermes event: {}", event.data);
                         if let Ok(msg) = serde_json::from_str::<HermesMessage>(&event.data) {
-                            let mut prices_lock = prices.write().unwrap();
-                            let mut stats_lock = stats.write().unwrap();
-
                             for update in msg.parsed {
                                 let id = update.id;
                                 if let Some(asset) = asset_map
@@ -138,15 +120,27 @@ impl HermesProvider {
                                 {
                                     if let Ok(price) = update.price.price.parse::<f64>() {
                                         let final_price = price * 10f64.powi(update.price.expo);
-
-                                        prices_lock.insert(
+                                        let price_data = PriceData::new(
                                             *asset,
-                                            PriceData::new(
-                                                *asset,
-                                                final_price,
-                                                "hermes-sse".to_string(),
-                                            ),
+                                            final_price,
+                                            "hermes-sse".to_string(),
                                         );
+
+                                        // Update local cache
+                                        {
+                                            let mut prices_lock = prices.write().unwrap();
+                                            prices_lock.insert(*asset, price_data.clone());
+                                        }
+
+                                        // Update global store if available
+                                        if let Some(ref store) = global_store {
+                                            store.update_price(*asset, price_data.clone()).await;
+                                        }
+
+                                        // Broadcast if channel available
+                                        if let Some(ref tx) = update_tx {
+                                            let _ = tx.send(price_data);
+                                        }
 
                                         tracing::debug!(
                                             "Updated {} to ${:.2} (Hermes)",
@@ -154,8 +148,12 @@ impl HermesProvider {
                                             final_price
                                         );
 
-                                        stats_lock.total_updates += 1;
-                                        stats_lock.last_update = std::time::Instant::now();
+                                        // Update stats
+                                        {
+                                            let mut stats_lock = stats.write().unwrap();
+                                            stats_lock.total_updates += 1;
+                                            stats_lock.last_update = std::time::Instant::now();
+                                        }
                                     }
                                 }
                             }
@@ -212,5 +210,37 @@ impl crate::provider::MarketPriceProvider for HermesProvider {
 
     fn provider_name(&self) -> &'static str {
         "hermes-sse"
+    }
+
+    fn is_streaming(&self) -> bool {
+        true
+    }
+
+    fn start_streaming(
+        &self,
+        store: Arc<MarketPriceStore>,
+        update_tx: broadcast::Sender<PriceData>,
+    ) {
+        let prices = self.prices.clone();
+        let stats = self.stats.clone();
+        let client = self.client.clone();
+
+        tokio::spawn(async move {
+            loop {
+                info!("Connecting to Hermes real-time stream...");
+                if let Err(e) = Self::stream_prices(
+                    client.clone(),
+                    prices.clone(),
+                    Some(store.clone()),
+                    Some(update_tx.clone()),
+                    stats.clone(),
+                )
+                .await
+                {
+                    error!("Hermes stream disconnected: {}. Reconnecting in 5s...", e);
+                    tokio::time::sleep(Duration::from_secs(5)).await;
+                }
+            }
+        });
     }
 }

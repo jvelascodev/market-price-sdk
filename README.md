@@ -5,6 +5,7 @@ A high-performance Rust SDK for tracking real-time cryptocurrency market prices 
 ## Features
 
 - **Pyth Hermes (V2) Integration**: Real-time price streaming via Pyth's Hermes SSE API (HTTP/2).
+- **Reactive Architecture**: Zero-latency price delivery via `subscribe()` broadcast channel.
 - **Automated Failover**: Defaults to **Hermes** with optional fallback to **CoinGecko**.
 - **In-Memory Cache**: Sub-microsecond price retrieval from a thread-safe `RwLock` store.
 - **Background Polling/Streaming**: Background tasks handle both REST polling and SSE streaming.
@@ -30,13 +31,33 @@ use market_price_sdk::{MarketPriceTracker, Asset};
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Get the global tracker (initializes on first call)
-    // By default, it uses Pyth Hermes (SSE) as the primary source
     let tracker = MarketPriceTracker::global().await;
 
     // Get a price (checks cache first, handles staleness)
     match tracker.get_price(Asset::SOL).await {
         Ok(price) => println!("SOL Price: ${:.2} (via {})", price.price_usd, price.source),
         Err(e) => eprintln!("Error: {}", e),
+    }
+
+    Ok(())
+}
+```
+
+### Reactive Streaming
+
+For low-latency applications, subscribe to real-time updates directly:
+
+```rust
+use market_price_sdk::MarketPriceTracker;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let tracker = MarketPriceTracker::global().await;
+    let mut rx = tracker.subscribe();
+
+    println!("Listening for real-time price updates...");
+    while let Ok(price) = rx.recv().await {
+        println!("Update: {} -> ${:.2} ({})", price.asset.symbol(), price.price_usd, price.source);
     }
 
     Ok(())

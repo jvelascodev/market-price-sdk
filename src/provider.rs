@@ -2,10 +2,13 @@
 
 use crate::{
     error::ProviderError,
+    store::MarketPriceStore,
     types::{Asset, PriceData},
 };
 use async_trait::async_trait;
 use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::sync::broadcast;
 
 /// Trait for market price providers
 ///
@@ -38,6 +41,20 @@ pub trait MarketPriceProvider: Send + Sync {
 
     /// Returns the name of this provider
     fn provider_name(&self) -> &'static str;
+
+    /// Returns true if this is a streaming provider (e.g. gRPC, SSE)
+    fn is_streaming(&self) -> bool {
+        false
+    }
+
+    /// Starts streaming updates into the provided store and broadcast channel
+    fn start_streaming(
+        &self,
+        _store: Arc<MarketPriceStore>,
+        _update_tx: broadcast::Sender<PriceData>,
+    ) {
+        // Default no-op for non-streaming providers
+    }
 }
 
 #[cfg(test)]
@@ -89,10 +106,17 @@ pub mod mock {
                 Some(Err(err)) => {
                     // Manual "clone" of ProviderError since it doesn't implement Clone
                     match err {
-                        ProviderError::NetworkError(e) => Err(ProviderError::ApiError(format!("Network error (cloned): {}", e))),
-                        ProviderError::InvalidResponse(s) => Err(ProviderError::InvalidResponse(s.clone())),
+                        ProviderError::NetworkError(e) => Err(ProviderError::ApiError(format!(
+                            "Network error (cloned): {}",
+                            e
+                        ))),
+                        ProviderError::InvalidResponse(s) => {
+                            Err(ProviderError::InvalidResponse(s.clone()))
+                        }
                         ProviderError::RateLimitExceeded => Err(ProviderError::RateLimitExceeded),
-                        ProviderError::UnsupportedAsset(s) => Err(ProviderError::UnsupportedAsset(s.clone())),
+                        ProviderError::UnsupportedAsset(s) => {
+                            Err(ProviderError::UnsupportedAsset(s.clone()))
+                        }
                         ProviderError::ApiError(s) => Err(ProviderError::ApiError(s.clone())),
                         ProviderError::Timeout => Err(ProviderError::Timeout),
                     }
